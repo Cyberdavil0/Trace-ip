@@ -1,52 +1,158 @@
 #!/bin/bash
 
 echo "[+] Installing Trace-it CLI..."
+echo "------------------------------------------"
 
-# Detect environment
-if command -v apt &>/dev/null; then
-  ENV="debian"
-elif command -v pkg &>/dev/null; then
-  ENV="termux"
-else
-  ENV="unknown"
+OS=$(uname -s)
+
+# ===========================================================
+# VERIFY trace.sh EXISTS
+# ===========================================================
+if [[ ! -f "trace.sh" ]]; then
+    echo "[!] ERROR: trace.sh not found!"
+    echo "Place setup.sh and trace.sh in the SAME directory."
+    exit 1
 fi
 
-# Make main script executable
+# ===========================================================
+# PREPARE CLI WRAPPER
+# ===========================================================
+echo "[+] Making script executable..."
 chmod +x trace.sh
-mv trace.sh trace
 
-# Install binary
+# Create wrapper command
+echo '#!/bin/bash' > trace
+echo 'bash "$(dirname $0)/Trace-ip/trace.sh" "$@"' >> trace
+chmod +x trace
+
+# ===========================================================
+# INSTALL FULL FOLDER + CLI COMMAND
+# ===========================================================
 if [[ "$EUID" -eq 0 ]]; then
-  echo "[✓] Running as root. Installing globally..."
-  mv trace /usr/local/bin/
-  echo "[✓] Installed at /usr/local/bin/trace"
-else
-  echo "[!] Not running as root. Installing locally..."
+    echo "[+] Installing globally (root)..."
 
-  if [[ "$ENV" == "debian" ]]; then
+    # Move entire folder
+    TARGET="/usr/bin/Trace-ip"
+    rm -rf "$TARGET"
+    mkdir -p "$TARGET"
+    cp -r ./* "$TARGET/"
+
+    # Move CLI wrapper
+    mv -f trace /usr/bin/trace
+    chmod +x "/usr/bin/trace"
+    echo "[✓] Installed"
+else
+    echo "[+] not rooted "
+
+    TARGET="$HOME/.local/bin/Trace-ip"
+    mkdir -p "$TARGET"
+    cp -r ./* "$TARGET/"
+
     mkdir -p "$HOME/.local/bin"
-    mv trace "$HOME/.local/bin/"
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-    source "$HOME/.bashrc"
-    echo "[✓] Installed at ~/.local/bin/trace"
-  elif [[ "$ENV" == "termux" ]]; then
-    mkdir -p "$HOME/bin"
-    mv trace "$HOME/bin/"
-    echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
-    source "$HOME/.bashrc"
-    echo "[✓] Installed at ~/bin/trace"
-  else
-    echo "[!] Unsupported environment. Please move 'trace' to a PATH directory manually."
-  fi
+    mv -f trace "$HOME/.local/bin/trace"
+    chmod +x "$HOME/.local/bin/trace"
+
+    if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc 2>/dev/null; then
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+    fi
+
+    echo "setup successful!"
 fi
 
-# Install dependencies
-echo "[+] Installing required packages..."
-if [[ "$ENV" == "debian" ]]; then
-  apt update && apt install curl jq dnsutils net-tools nmap wireless-tools network-manager bluez -y
-elif [[ "$ENV" == "termux" ]]; then
-  pkg update && pkg install curl jq dnsutils net-tools nmap wireless-tools network-manager bluez -y
+echo ""
+echo "[Trace-it] Dependency Checker"
+echo "------------------------------------------"
+
+# ===========================================================
+# REQUIRED TOOLS
+# ===========================================================
+REQUIRED_TOOLS=(curl jq dig arp hostname ip nmap iwlist nmcli bluetoothctl)
+
+# ===========================================================
+# INSTALL FUNCTIONS
+# ===========================================================
+install_linux() {
+    if command -v sudo >/dev/null 2>&1; then
+        apt update -y
+        apt install -y "$@"
+    else
+        sudo apt update -y 2>/dev/null
+        sudo apt install -y "$@" 2>/dev/null
+    fi
+}
+
+install_termux() {
+    pkg update -y
+    pkg install -y "$@"
+}
+
+install_macos() {
+    if ! command -v brew >/dev/null 2>&1; then
+        echo "[!] Homebrew not installed → installing..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    fi
+    brew install "$@"
+}
+
+# ===========================================================
+# DETECT ENVIRONMENT
+# ===========================================================
+if command -v pkg >/dev/null 2>&1; then
+    ENV="termux"
+elif command -v apt >/dev/null 2>&1; then
+    ENV="linux"
+elif [[ "$OS" == "Darwin" ]]; then
+    ENV="macos"
 else
-  echo "[!] Please install manually: curl, jq, dig, arp, hostname, ip, nmap, iwlist, nmcli, bluetoothctl"
+    ENV="unknown"
 fi
-echo "[✓] Installation complete. You can now use the 'trace' command."
+
+echo "Detected environment: $ENV"
+echo ""
+
+# ===========================================================
+# CHECK MISSING TOOLS
+# ===========================================================
+MISSING=()
+
+for tool in "${REQUIRED_TOOLS[@]}"; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        MISSING+=("$tool")
+    fi
+done
+
+if [[ ${#MISSING[@]} -eq 0 ]]; then
+    echo "[✓] All dependencies already installed!"
+    echo "[✓] Setup complete → run: trace "
+    exit 0
+fi
+
+echo "Missing tools:"
+printf ' - %s\n' "${MISSING[@]}"
+echo ""
+
+# ===========================================================
+# INSTALL MISSING PACKAGES
+# ===========================================================
+case $ENV in
+    linux)
+        echo "[+] Installing tools (Linux/WSL)..."
+        install_linux "${MISSING[@]}"
+        ;;
+    termux)
+        echo "[+] Installing tools (Termux)..."
+        install_termux "${MISSING[@]}"
+        ;;
+    macos)
+        echo "[+] Installing tools (macOS)..."
+        install_macos "${MISSING[@]}"
+        ;;
+    *)
+        echo "[!] Unsupported OS → install manually:"
+        printf '   %s\n' "${MISSING[@]}"
+        ;;
+esac
+
+echo ""
+echo "[✓] Setup finished successfully!"
+echo "Run your tool using:  trace "

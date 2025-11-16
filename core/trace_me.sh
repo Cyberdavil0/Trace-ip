@@ -13,7 +13,7 @@ hostname=$(hostname)
 public_ip=$(curl -s ifconfig.me)
 
 # Get MAC address for local IP
-mac_address=$(ifconfig | grep ether | awk '{print $2}' | head -1)
+mac_address=$(ip link show | awk '/ether/ {print $2; exit}')
 
 # Trace public IP
 info=$(curl -s "http://ip-api.com/json/$public_ip")
