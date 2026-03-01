@@ -5,7 +5,7 @@
 # ===========================================================
 
 APP_NAME="Trace-ip"
-REPO_URL="https://github.com/yourusername/Trace-ip/archive/refs/heads/main.zip"
+REPO_URL="https://github.com/Cyberdavil0/Trace-ip.git"
 
 # ===========================================================
 # Detect Install Location
