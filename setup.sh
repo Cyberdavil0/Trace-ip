@@ -1,138 +1,165 @@
 #!/bin/bash
+# ===========================================================
+# Trace-it Universal Installer (Root Optional + Robust Wrapper)
+# Supports: install | --update | --uninstall
+# ===========================================================
 
-echo "[+] Installing Trace-it CLI..."
-echo "------------------------------------------"
-
-OS=$(uname -s)
+APP_NAME="Trace-ip"
+REPO_URL="https://github.com/yourusername/Trace-ip/archive/refs/heads/main.zip"
 
 # ===========================================================
-# VERIFY trace.sh EXISTS
+# Detect Install Location
 # ===========================================================
-if [[ ! -f "trace.sh" ]]; then
-    echo "[!] ERROR: trace.sh not found!"
-    echo "Place setup.sh and trace.sh in the SAME directory."
+
+if [[ "$EUID" -eq 0 ]]; then
+    INSTALL_DIR="/usr/bin/Trace-ip"
+    BIN_PATH="/usr/bin/trace"
+    MODE="global"
+else
+    INSTALL_DIR="$HOME/.local/bin/Trace-ip"
+    BIN_PATH="$HOME/.local/bin/trace"
+    MODE="local"
+fi
+
+# ===========================================================
+# INSTALL FUNCTION
+# ===========================================================
+install_app() {
+    echo "[+] Installing $APP_NAME ($MODE mode)..."
+
+    # Remove old files if any
+    rm -rf "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR"
+
+    # Copy current folder contents to install dir
+    cp -r "$(pwd)"/* "$INSTALL_DIR/"
+
+    # Create robust wrapper
+    mkdir -p "$(dirname "$BIN_PATH")"
+    cat <<'EOF' > "$BIN_PATH"
+#!/bin/bash
+# ===========================================================
+# Trace-it Robust Wrapper
+# ===========================================================
+
+# Determine installation location
+if [[ -d "/usr/bin/Trace-ip" ]]; then
+    TRACE_DIR="/usr/bin/Trace-ip"
+elif [[ -d "$HOME/.local/bin/Trace-ip" ]]; then
+    TRACE_DIR="$HOME/.local/bin/Trace-ip"
+else
+    echo "[!] Trace-it not installed. Run setup.sh first."
     exit 1
 fi
 
-# ===========================================================
-# PREPARE CLI WRAPPER
-# ===========================================================
-echo "[+] Making scripts executable..."
-chmod +x trace.sh
-
-# Create wrapper command
-echo '#!/bin/bash' > trace
-echo 'bash "$(dirname "$0")/Trace-ip/trace.sh" "$@"' >> trace
-chmod +x trace
-
-# ===========================================================
-# INSTALL FULL TOOL FOLDER + CLI COMMAND
-# ===========================================================
-if [[ "$EUID" -eq 0 ]]; then
-    echo "[+] Installing globally (root)..."
-
-    TARGET="/usr/bin/Trace-ip"
-    rm -rf "$TARGET"
-    mkdir -p "$TARGET"
-    cp -r ./* "$TARGET/"
-
-    mv -f trace /usr/bin/trace
-    chmod +x /usr/bin/trace
-
-    echo "[✓] Global install complete."
-else
-    echo "[+] Installing locally (non-root)..."
-
-    TARGET="$HOME/.local/bin/Trace-ip"
-    rm -rf "$TARGET"
-    mkdir -p "$TARGET"
-    cp -r ./* "$TARGET/"
-
-    mkdir -p "$HOME/.local/bin"
-    mv -f trace "$HOME/.local/bin/trace"
-    chmod +x "$HOME/.local/bin/trace"
-
-    if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc 2>/dev/null; then
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-    fi
-
-    echo "[✓] Local install complete."
+TRACE_SCRIPT="$TRACE_DIR/trace.sh"
+if [[ ! -f "$TRACE_SCRIPT" ]]; then
+    echo "[!] trace.sh missing in $TRACE_DIR"
+    exit 1
 fi
 
-echo ""
-echo "[Trace-it] Dependency Checker"
-echo "------------------------------------------"
-
-# ===========================================================
-# REQUIRED TOOLS
-# ===========================================================
-REQUIRED_TOOLS=(curl jq dig hostname arp ip nmap iwlist nmcli bluetoothctl)
-
-# ===========================================================
-# FUNCTIONS FOR INSTALLING LATEST VERSIONS
-# ===========================================================
-install_linux() {
-    sudo apt update -y
-    sudo apt install -y "$@"
-}
-
-install_termux() {
-    pkg update -y
-    pkg upgrade -y
-    pkg install -y "$@"
-}
-
-install_macos() {
-    if ! command -v brew >/dev/null 2>&1; then
-        echo "[!] Homebrew missing → installing..."
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    fi
-    brew update
-    brew install "$@"
-}
-
-# ===========================================================
-# DETECT PLATFORM
-# ===========================================================
-if command -v pkg >/dev/null 2>&1; then
-    ENV="termux"
-elif command -v apt >/dev/null 2>&1; then
-    ENV="linux"
-elif [[ "$OS" == "Darwin" ]]; then
-    ENV="macos"
-else
-    ENV="unknown"
-fi
-
-echo "Detected environment: $ENV"
-echo ""
-
-# ===========================================================
-# CHECK FOR MISSING TOOLS
-# ===========================================================
+# Optional dependency check
+REQUIRED_TOOLS=(bash curl jq dig nmap ip arp hostname)
 MISSING=()
-
 for tool in "${REQUIRED_TOOLS[@]}"; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         MISSING+=("$tool")
     fi
 done
-
-if [[ ${#MISSING[@]} -eq 0 ]]; then
-    echo "[✓] All dependencies already installed!"
-else
-    echo "Missing tools:"
-    for m in "${MISSING[@]}"; do echo " - $m"; done
-    echo ""
-
-    case $ENV in
-        linux)  echo "[+] Installing missing packages (Linux)..."; install_linux "${MISSING[@]}";;
-        termux) echo "[+] Installing missing packages (Termux)..."; install_termux "${MISSING[@]}";;
-        macos)  echo "[+] Installing missing packages (macOS)...";  install_macos "${MISSING[@]}";;
-        *)      echo "[!] Unsupported OS. Install manually."; exit 1;;
-    esac
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+    echo "[!] Missing dependencies: ${MISSING[*]}"
+    echo "Install them and try again."
+    exit 1
 fi
 
-echo ""
-echo "[✓] Setup finished!"
-echo "Run Trace-it with: trace"
+# Run actual trace.sh
+exec bash "$TRACE_SCRIPT" "$@"
+EOF
+
+    chmod +x "$BIN_PATH"
+    chmod +x "$INSTALL_DIR/trace.sh"
+
+    # Add PATH for local install
+    if [[ "$MODE" == "local" ]]; then
+        if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc 2>/dev/null; then
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+            echo "[+] Added ~/.local/bin to PATH"
+        fi
+    fi
+
+    echo "[✓] Installation complete!"
+    echo "Run the tool using: trace"
+}
+
+# ===========================================================
+# UNINSTALL FUNCTION
+# ===========================================================
+uninstall_app() {
+    echo "[+] Removing $APP_NAME..."
+    rm -rf "$INSTALL_DIR"
+    rm -f "$BIN_PATH"
+    echo "[✓] Uninstalled successfully."
+}
+
+# ===========================================================
+# UPDATE FUNCTION
+# ===========================================================
+update_app() {
+    echo "[+] Updating $APP_NAME from GitHub..."
+
+    TMP_DIR="/tmp/trace_update"
+    rm -rf "$TMP_DIR"
+    mkdir -p "$TMP_DIR"
+
+    wget -q "$REPO_URL" -O "$TMP_DIR/update.zip" || {
+        echo "[!] Download failed."
+        exit 1
+    }
+
+    unzip -q "$TMP_DIR/update.zip" -d "$TMP_DIR"
+
+    NEW_DIR=$(find "$TMP_DIR" -type d -name "Trace-ip-*")
+    if [[ -z "$NEW_DIR" ]]; then
+        echo "[!] Extraction failed."
+        exit 1
+    fi
+
+    rm -rf "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR"
+    cp -r "$NEW_DIR"/* "$INSTALL_DIR/"
+    chmod +x "$INSTALL_DIR/trace.sh"
+
+    echo "[✓] Update complete!"
+}
+
+# ===========================================================
+# SHOW HELP
+# ===========================================================
+show_help() {
+    echo "Trace-it Installer"
+    echo ""
+    echo "Usage:"
+    echo "  ./setup.sh             → Install"
+    echo "  ./setup.sh --update    → Update from GitHub"
+    echo "  ./setup.sh --uninstall → Remove tool"
+    echo ""
+    echo "Tip: Run with sudo for global install."
+}
+
+# ===========================================================
+# MAIN LOGIC
+# ===========================================================
+case "$1" in
+    --update)
+        update_app
+        ;;
+    --uninstall)
+        uninstall_app
+        ;;
+    "")
+        install_app
+        ;;
+    *)
+        show_help
+        ;;
+esac
